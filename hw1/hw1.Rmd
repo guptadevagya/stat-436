@@ -1,0 +1,409 @@
+---
+title: "hw1"
+author: "Devagya Gupta"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo = TRUE,
+  warning = FALSE,
+  message = FALSE,
+  fig.width = 12,
+  fig.height = 7,
+  dpi = 120
+)
+
+library(ggplot2)
+library(dplyr)
+library(readr)
+library(tidyr)
+library(forcats)
+library(scales)
+library(patchwork)
+library(nycflights13)
+library(lubridate)
+library(stringr)
+
+# User-provided palette
+cb_light_blue  <- "#a6cee3"
+cb_dark_blue   <- "#1f78b4"
+cb_light_green <- "#b2df8a"
+cb_dark_green  <- "#33a02c"
+cb_pink        <- "#fb9a99"
+
+theme_set(
+  theme_minimal(base_size = 13) +
+    theme(
+      plot.title = element_text(size = 15, face = "bold"),
+      plot.subtitle = element_text(size = 12),
+      axis.text.x = element_text(size = 10),
+      axis.text.y = element_text(size = 10),
+      legend.title = element_text(size = 11),
+      legend.text = element_text(size = 10)
+    )
+)
+```
+
+# 1. NYC Flights
+
+**a. Create speed = distance / air_time**
+
+```{r nyc-speed-calc}
+flights2 <- flights %>%
+  mutate(speed = distance / air_time)
+```
+
+**b. Is there large variation in speed across carriers?**
+
+```{r nyc-speed-plot, fig.width=13, fig.height=7.5}
+ggplot(flights2, aes(x = carrier, y = speed)) +
+  geom_boxplot(fill = cb_light_blue, outlier.alpha = 0.2, color = "gray35") +
+  coord_cartesian(ylim = c(2, 8)) +
+  labs(
+    title = "Flight Speed by Carrier (NYC 2013)",
+    x = "Carrier",
+    y = "Speed (miles per minute)"
+  )
+```
+
+I used a boxplot because it shows median, spread, and outliers for each carrier in one view. There is noticeable variation across carriers. Some carriers have higher typical speeds, and some have wider spread, which means less consistency.
+
+# 2. London Olympics
+
+```{r olympics-load}
+olympics <- read_csv("https://uwmadison.box.com/shared/static/rzw8h2x6dp5693gdbpgxaf2koqijo12l.csv", show_col_types = FALSE)
+```
+
+**a. Layered display: athlete ages + average age per sport**
+
+```{r olympics-layered, fig.width=15, fig.height=8}
+avg_age <- olympics %>%
+  filter(!is.na(Age), !is.na(Sport)) %>%
+  group_by(Sport) %>%
+  summarise(avg_age = mean(Age), .groups = "drop")
+
+ggplot(olympics, aes(x = Sport, y = Age)) +
+  geom_jitter(alpha = 0.25, color = cb_dark_blue, width = 0.2, size = 1.4) +
+  geom_point(
+    data = avg_age, aes(x = Sport, y = avg_age),
+    color = cb_dark_green, size = 2.8
+  ) +
+  labs(
+    title = "Athlete Ages Across Sports",
+    x = "Sport",
+    y = "Age"
+  ) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+**b. Sort sports from lowest to highest average age**
+
+```{r olympics-sorted, fig.width=15, fig.height=8}
+sorted_levels <- avg_age %>%
+  arrange(avg_age) %>%
+  pull(Sport)
+
+avg_age_sorted <- avg_age %>%
+  mutate(Sport = factor(Sport, levels = sorted_levels))
+
+olympics_sorted <- olympics %>%
+  mutate(Sport = factor(Sport, levels = sorted_levels))
+
+ggplot(olympics_sorted, aes(x = Sport, y = Age)) +
+  geom_jitter(alpha = 0.25, color = cb_light_blue, width = 0.2, size = 1.4) +
+  geom_point(
+    data = avg_age_sorted, aes(x = Sport, y = avg_age),
+    color = cb_dark_green, size = 2.8
+  ) +
+  labs(
+    title = "Athlete Ages by Sport (Sorted by Mean Age)",
+    x = "Sport",
+    y = "Age"
+  ) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+**c. New question + visualization**
+
+New question: Are male and female athletes different in average age across sports?
+
+```{r olympics-gender, fig.width=15, fig.height=8}
+age_sex <- olympics %>%
+  filter(!is.na(Age), !is.na(Sport), !is.na(Sex)) %>%
+  group_by(Sport, Sex) %>%
+  summarise(mean_age = mean(Age), .groups = "drop")
+
+ggplot(age_sex, aes(x = reorder(Sport, mean_age), y = mean_age, fill = Sex)) +
+  geom_col(position = "dodge", color = "gray35") +
+  scale_fill_manual(values = c("F" = cb_pink, "M" = cb_dark_blue)) +
+  labs(
+    title = "Average Age by Sport and Sex",
+    x = "Sport",
+    y = "Average Age"
+  ) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+This chart helps compare men and women side by side within each sport. Most sports show similar average ages, with a few sports having clearer gaps.
+
+# 3. Pokemon
+
+```{r pokemon-load}
+pokemon <- read_csv("https://uwmadison.box.com/shared/static/hf5cmx3ew3ch0v6t0c2x56838er1lt2c.csv", show_col_types = FALSE)
+```
+
+**a. Add attack-to-defense ratio**
+
+```{r pokemon-ratio}
+pokemon2 <- pokemon %>%
+  mutate(attack_defend_ratio = Attack / Defense)
+```
+
+**b. Median ratio by type_1**
+
+```{r pokemon-median}
+med_type <- pokemon2 %>%
+  filter(!is.na(attack_defend_ratio), is.finite(attack_defend_ratio)) %>%
+  group_by(type_1) %>%
+  summarise(median_ratio = median(attack_defend_ratio, na.rm = TRUE), .groups = "drop") %>%
+  arrange(desc(median_ratio))
+
+med_type
+```
+
+**c. Faceted Attack vs Defense, ordered by median ratio**
+
+```{r pokemon-facet, fig.width=16, fig.height=10}
+type_order <- med_type$type_1
+
+pokemon3 <- pokemon2 %>%
+  mutate(type_1 = factor(type_1, levels = type_order))
+
+ggplot(pokemon3, aes(x = Defense, y = Attack)) +
+  geom_point(alpha = 0.55, color = cb_dark_blue, size = 1.8) +
+  facet_wrap(~ type_1, scales = "free") +
+  labs(
+    title = "Attack vs Defense by Pokemon Type",
+    subtitle = "Panels ordered by median Attack/Defense ratio",
+    x = "Defense",
+    y = "Attack"
+  )
+```
+
+**d. Dynamic query proposal**
+
+I would build an interactive scatterplot with Attack/Defense on one axis and HP on the other. Users could filter by type, legendary status, and generation using checkboxes and dropdowns. The display would update instantly and also show the top matching Pokemon in a small side table.
+
+# 4. Gene Expression Faceting
+
+```{r genes-load}
+genes <- read_csv("https://uwmadison.box.com/shared/static/dwzchdtfca33r0f6i055k2d0939onnlv.csv", show_col_types = FALSE)
+```
+
+**a. Small multiples with transparency and log transform**
+
+```{r genes-small-multiples, fig.width=15, fig.height=9}
+ggplot(genes, aes(x = time, y = log1p(value))) +
+  geom_point(alpha = 0.3, color = cb_dark_blue, size = 1.5) +
+  facet_wrap(~ gene) +
+  labs(x = "Time", y = "log(1 + value)", title = "Gene Expression Over Time")
+```
+
+**b. One strength and one weakness**
+
+A strength of small multiples is that they make side-by-side comparison across genes very easy.
+A weakness is that when there are many panels, each panel gets small and details are harder to read.
+
+**c. Heatmap, sorted by abundance, log scale fill**
+
+```{r genes-heatmap, fig.width=13, fig.height=8}
+gene_groups <- genes %>%
+  group_by(gene, rounded_time = round(time, 2)) %>%
+  summarise(mean_value = mean(value), .groups = "drop")
+
+gene_order <- gene_groups %>%
+  group_by(gene) %>%
+  summarise(avg_abundance = mean(mean_value), .groups = "drop") %>%
+  arrange(desc(avg_abundance)) %>%
+  pull(gene)
+
+gene_groups2 <- gene_groups %>%
+  mutate(gene = factor(gene, levels = gene_order))
+
+ggplot(gene_groups2, aes(x = rounded_time, y = gene, fill = log1p(mean_value))) +
+  geom_tile() +
+  scale_fill_gradient(low = "#e5f5f9", high = cb_dark_blue) +
+  labs(
+    title = "Heatmap of Gene Expression",
+    x = "Time",
+    y = "Gene",
+    fill = "log(1 + mean)"
+  )
+```
+
+**d. Overlay fitted smooth curves + grammar of graphics note**
+
+```{r genes-smooth, fig.width=15, fig.height=9}
+ggplot(genes, aes(x = time, y = log1p(value))) +
+  geom_point(alpha = 0.3, color = "gray60", size = 1.4) +
+  geom_smooth(se = FALSE, color = cb_light_blue, linewidth = 0.95) +
+  facet_wrap(~ gene) +
+  labs(x = "Time", y = "log(1 + value)", title = "Gene Expression with Fitted Curves")
+```
+
+This follows grammar of graphics because I keep the same data and mappings, then add another layer (`geom_smooth`) to represent model-based trends.
+
+# 5. Visual Redesign
+
+**a-b**
+My original grouped bar chart showed podium rate by team. The goal was to compare team performance, but it was limited to only a few teams and years, missing the bigger picture of the full grid's performance at every race.
+
+**c**
+The previous charts (grouped bars and small multiples) either cluttered the view or didn't show the detailed race-by-race breakdown. They also often excluded smaller teams. A line chart was too messy ("spaghetti plot"), and team-specific colors were distracting without adding clarity.
+
+**d**
+I redesigned the visualization as a **comprehensive heatmap** for the 2024 season. By plotting **Teams vs. Tracks**, we can see the entire season's performance at once.
+*   **Metric**: Total points per race (sum of both drivers).
+*   **Color**: A single blue gradient (`cb_light_blue` to `cb_dark_blue`) intuitively shows performance intensity (darker = more points).
+*   **Completeness**: It includes **all teams** (not just the top 5), allowing us to see mid-field battles (like Haas vs. RB) that were previously hidden.
+*   **Clarity**: The grid layout removes overlap, and text labels provide exact values.
+
+```{r redesign-f1, fig.width=14, fig.height=10}
+# folder
+dir <- "../datasets/formula1"
+
+# load 2024 data
+r24 <- read_csv(file.path(dir, "Formula1_2024season_raceResults.csv"), show_col_types = FALSE)
+
+# helper
+has <- function(x, s) grepl(s, x, fixed = TRUE)
+
+# standardize team names
+race <- r24 %>%
+  mutate(team_clean = case_when(
+    has(Team, "Red Bull") ~ "Red Bull",
+    has(Team, "AlphaTauri") ~ "RB",
+    has(Team, "Visa Cash App") ~ "RB",
+    has(Team, "VCARB") ~ "RB",
+    has(Team, "Kick Sauber") ~ "Sauber",
+    has(Team, "Sauber") ~ "Sauber",
+    has(Team, "Alfa Romeo") ~ "Sauber",
+    has(Team, "Aston Martin") ~ "Aston Martin",
+    has(Team, "McLaren") ~ "McLaren",
+    has(Team, "Alpine") ~ "Alpine",
+    has(Team, "Williams") ~ "Williams",
+    has(Team, "Haas") ~ "Haas",
+    has(Team, "Ferrari") ~ "Ferrari",
+    has(Team, "Mercedes") ~ "Mercedes",
+    TRUE ~ Team
+  ))
+
+# aggregation: points by team per track
+# Filter out tracks if needed, but here we keep all for completeness
+hm_data <- race %>%
+  group_by(Track, team_clean) %>%
+  summarise(points = sum(Points, na.rm = TRUE), .groups = "drop")
+
+# order teams by total points descending
+team_totals <- hm_data %>%
+  group_by(team_clean) %>%
+  summarise(total = sum(points), .groups = "drop") %>%
+  arrange(total) %>%
+  pull(team_clean)
+
+# order tracks by calendar order (approximate by appearance in file or just alphabetical/total points)
+# To keep it simple and readable, let's order tracks by total points scored (which proxies race excitement/incidents) or just keep alphabetic. 
+# Better: Order tracks by when they happened? The CSV usually has them in order. Let's rely on the file order if possible, or factor based on unique appearance.
+track_order <- unique(race$Track)
+
+hm_data <- hm_data %>%
+  mutate(
+    team_clean = factor(team_clean, levels = team_totals), # Best teams at top
+    Track = factor(Track, levels = track_order)
+  )
+
+# Plot
+ggplot(hm_data, aes(x = Track, y = team_clean, fill = points)) +
+  geom_tile(color = "white", linewidth = 0.5) +
+  geom_text(
+    aes(label = ifelse(points > 0, points, "")),
+    size = 3.5,
+    fontface = "bold",
+    color = "white" # Contrast with blue
+  ) +
+  # Use logic for text color contrast if needed, but white on blue usually works for darker, grey for lighter.
+  # Let's stick to a simple clean look.
+  scale_fill_gradient(
+    low = "grey95", # Use grey for 0/low points to reduce visual weight of empty cells
+    high = cb_dark_blue,
+    na.value = "grey95",
+    name = "Points"
+  ) +
+  labs(
+    title = "F1 2024 Constructor Performance Heatmap",
+    subtitle = "Points scored by each team at every Grand Prix",
+    x = NULL,
+    y = NULL,
+    caption = "Teams ordered by Championship Standing | Tracks ordered by Calendar"
+  ) +
+  theme_minimal(base_size = 12) +
+  theme(
+    plot.title = element_text(face = "bold", size = 16),
+    axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1, face = "bold"),
+    axis.text.y = element_text(face = "bold", size = 11),
+    panel.grid = element_blank(),
+    legend.position = "right"
+  )
+```
+
+# 6. California Wildfires Alternatives
+
+```{r wildfires-load}
+fires <- read_csv("https://uwmadison.box.com/shared/static/k5vvekf1bhh9e16qb9s66owygc70t7dm.csv", show_col_types = FALSE) %>%
+  select(Name, Counties, year, day_of_year, AcresBurned, MajorIncident)
+```
+
+Approach 1 is good for comparing yearly volume and rough spread, but weak for county-level location comparisons.
+Approach 2 is good for comparing fire-size distributions and major vs non-major differences, but weak for event timing and geography.
+Approach 3 is good for ranking largest fires and magnitude gaps, but weak for understanding full yearly totals and frequency.
+
+**d. Code**
+
+```{r wildfires-plot, fig.width=13, fig.height=8}
+top_fires <- fires %>%
+  filter(!is.na(AcresBurned)) %>%
+  slice_max(AcresBurned, n = 18, with_ties = FALSE) %>%
+  mutate(Name = reorder(Name, AcresBurned))
+
+ggplot(top_fires, aes(Name, AcresBurned, fill = factor(year))) +
+  geom_col(color = "gray35") +
+  coord_flip() +
+  scale_y_continuous(labels = comma) +
+  scale_fill_brewer(palette = "Pastel1") +
+  labs(
+    title = "Fires with the Most Acres Burned",
+    x = "Fire",
+    y = "Acres Burned",
+    fill = "Year"
+  ) +
+  theme_classic(base_size = 13)
+```
+
+# 7. Homelessness
+
+**a. What question is this visualization trying to answer?**
+This visualization is trying to show where people experiencing homelessness were relocated by bus across the mainland U.S. from 2011 to 2017, how many arrivals each destination city received (bubble size), and how total relocation journeys changed over time (bar chart below).
+
+**b. What works well in the current design?**
+The map quickly communicates geographic spread and highlights major destination hubs. Bubble size makes high-volume cities stand out immediately, and the timeline below adds useful temporal context by showing variation over time and the overall total (21,400). The soft color palette also keeps the chart visually clean.
+
+**c. What could be improved?**
+Overlapping bubbles in dense regions (especially the Northeast, California, and Florida) reduce readability and make exact comparison difficult. The chart also uses raw counts only, which can bias interpretation toward larger cities. In addition, the red points are not clearly explained in the legend area, and the time axis labels are limited for detailed month-to-month reading.
+
+**d. One concrete redesign recommendation**
+I would redesign it as a two-view layout:
+(1) a ranked horizontal bar chart of top destination cities with both raw arrivals and per-capita arrivals, and
+(2) a clearly labeled time-series line chart for 2011–2017.
+I would keep a simplified map for geographic context only, not exact comparison.
