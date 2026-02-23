@@ -1,0 +1,101 @@
+---
+title: "Olympics Derivations"
+output: html_document
+date: "`r Sys.Date()`"
+---
+
+```{r setup, include=FALSE}
+library(tidyverse)
+library(janitor)
+```
+
+# Load data
+```{r}
+olympics <- read_csv("https://uwmadison.box.com/shared/static/rzw8h2x6dp5693gdbpgxaf2koqijo12l.csv") %>%
+  clean_names()
+glimpse(olympics)
+```
+
+# (a) Create birth city and birth country
+```{r}
+olympics2 <- olympics %>%
+  mutate(
+    birth_city = if_else(
+      is.na(place_of_birth),
+      NA_character_,
+      str_trim(str_remove(place_of_birth, "\\s*\\([^)]*\\)\\s*$"))
+    ),
+    birth_country = if_else(
+      is.na(place_of_birth),
+      NA_character_,
+      str_extract(place_of_birth, "(?<=\\().*(?=\\))")
+    )
+  )
+
+# show that it worked
+olympics2 %>%
+  select(name, place_of_birth, birth_city, birth_country) %>%
+  head(10)
+```
+
+# (b) Standard deviation of athlete age within each sport
+```{r}
+age_sd_by_sport <- olympics2 %>%
+  filter(!is.na(age), !is.na(sport)) %>%
+  group_by(sport) %>%
+  summarize(
+    n = n(),
+    sd_age = sd(age),
+    .groups = "drop"
+  ) %>%
+  arrange(desc(sd_age))
+
+# table of SDs (largest first)
+age_sd_by_sport %>% head(10)
+
+widest <- age_sd_by_sport %>% slice(1)
+
+cat(
+  "Sport with widest age SD:", widest$sport,
+  "| SD =", round(widest$sd_age, 2),
+  "| n =", widest$n
+)
+```
+
+# (c) Visualization of sports against participant age (sorted by age variance)
+```{r age_plot, fig.width=12, fig.height=14}
+sport_stats <- olympics2 %>%
+  filter(!is.na(age), !is.na(sport)) %>%
+  group_by(sport) %>%
+  summarize(
+    mean_age = mean(age),
+    sd_age = sd(age),
+    n = n(),
+    .groups = "drop"
+  ) %>%
+  arrange(sd_age) %>%
+  mutate(sport = factor(sport, levels = sport))
+
+ggplot(sport_stats, aes(x = sport, y = mean_age)) +
+  geom_errorbar(aes(ymin = mean_age - sd_age, ymax = mean_age + sd_age),
+                width = 0.15, linewidth = 0.5) +
+  geom_point(size = 2.2) +
+  coord_flip() +
+  scale_x_discrete(labels = function(x) str_wrap(x, width = 28)) +
+  labs(
+    title = "Average age by sport (London 2012)",
+    subtitle = "Sports ordered by within-sport age standard deviation (±1 SD)",
+    x = NULL,
+    y = "Mean age"
+  ) +
+  theme_minimal(base_size = 12) +
+  theme(
+    panel.grid.minor = element_blank(),
+    panel.grid.major.y = element_blank(),           # remove horizontal gridlines (busy)
+    panel.grid.major.x = element_line(linewidth = 0.3),
+    axis.ticks.y = element_blank(),
+    plot.title = element_text(face = "bold", size = 16),
+    plot.subtitle = element_text(size = 11),
+    plot.margin = margin(10, 10, 10, 16)            # more space on left
+  )
+```
